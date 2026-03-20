@@ -1,4 +1,4 @@
-﻿namespace Email_Assistant.Models
+namespace EmailAssistant.UI.Models
 {
     public class EmailResponse
     {

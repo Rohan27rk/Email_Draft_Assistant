@@ -1,95 +1,38 @@
-using Email_Assistant.Infrastructure;
-using Email_Assistant.Models;
-using Email_Assistant.Services;
 
-namespace Email_Assistant
+using EmailAssistant.UI.Components;
+using EmailAssistant.UI.Services;
+
+var builder = WebApplication.CreateBuilder(args);
+
+// Add services to the container.
+builder.Services.AddRazorComponents()
+    .AddInteractiveServerComponents();
+
+// Configure HttpClient for API communication
+builder.Services.AddHttpClient<IApiService, ApiService>(client =>
 {
-    public class Program
-    {
-        public static void Main(string[] args)
-        {
-            var builder = WebApplication.CreateBuilder(args);
-
-            // Add services to the container.
-            builder.Services.AddAuthorization();
-            
-            // Choose AI Service Implementation
-            // Option 1: Azure OpenAI Function Calling (Default)
-            builder.Services.AddScoped<AIService>();
-            
-            // Register EmailHistoryService as singleton (persists for application lifetime)
-            builder.Services.AddSingleton<EmailHistoryService>();
-
-            // Configure CORS for frontend communication
-            builder.Services.AddCors(options =>
-            {
-                options.AddPolicy("AllowBlazorUI", policy =>
-                {
-                    policy.WithOrigins("http://localhost:5010", "http://localhost:5219", "http://localhost:5000", "https://localhost:7022")
-                          .AllowAnyMethod()
-                          .AllowAnyHeader()
-                          .AllowCredentials();
-                });
-            });
-
-            // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
-            builder.Services.AddEndpointsApiExplorer();
-            builder.Services.AddSwaggerGen();
-
-            var app = builder.Build();
-
-            // Configure the HTTP request pipeline.
-            if (app.Environment.IsDevelopment())
-            {
-                app.UseSwagger();
-                app.UseSwaggerUI();
-            }
-
-            // Enable CORS
-            app.UseCors("AllowBlazorUI");
-
-            app.UseAuthorization();
-
-
-            app.MapPost("/generate-email",
-async (
-    EmailRequest request,
-    AIService aiService,
-    EmailHistoryService historyService,
-    ILogger<Program> logger) =>
-{
-    try
-    {
-        logger.LogInformation("Received email generation request for recipient: {RecipientName}, KeyPoints: {KeyPoints}", 
-            request.RecipientName, request.KeyPoints);
-        
-        var response = await aiService.GenerateEmailAsync(request);
-        
-        // Store in history
-        historyService.AddEntry(request, response);
-
-        logger.LogInformation("Successfully generated email with subject: {Subject}", response.Subject);
-        return Results.Ok(response);   // return object, not string
-    }
-    catch (Exception ex)
-    {
-        logger.LogError(ex, "Error generating email: {Message}", ex.Message);
-        Console.WriteLine($"DEBUG: Backend exception - {ex.Message}");
-        // Return plain text error message (not JSON)
-        return Results.BadRequest(ex.Message);
-    }
+    // Backend API base URL (HTTP only) - Updated to match your actual backend port
+    client.BaseAddress = new Uri("http://localhost:5045");
+    client.Timeout = TimeSpan.FromSeconds(30);
 });
 
-            app.MapGet("/email-history",
-                (EmailHistoryService historyService) =>
-                {
-                    var history = historyService.GetAllEntries();
-                    return Results.Ok(history);
-                });
+var app = builder.Build();
 
-
-
-            app.Run();
-        }
-    }
+// Configure the HTTP request pipeline.
+if (!app.Environment.IsDevelopment())
+{
+    app.UseExceptionHandler("/Error", createScopeForErrors: true);
+    // The default HSTS value is 30 days. You may want to change this for production scenarios, see https://aka.ms/aspnetcore-hsts.
+    app.UseHsts();
 }
+
+// Remove HTTPS redirection for development (HTTP-only communication)
+// app.UseHttpsRedirection();
+
+app.UseStaticFiles();
+app.UseAntiforgery();
+
+app.MapRazorComponents<App>()
+    .AddInteractiveServerRenderMode();
+
+app.Run();

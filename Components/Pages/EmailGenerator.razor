@@ -1,0 +1,435 @@
+@page "/"
+@using EmailAssistant.UI.Models
+@using EmailAssistant.UI.Services
+@inject IApiService ApiService
+@inject IJSRuntime JSRuntime
+@rendermode InteractiveServer
+
+<PageTitle>Email Assistant</PageTitle>
+
+<div class="chatgpt-container">
+    <!-- Sidebar Toggle Button (Fixed position, always visible) -->
+    <button class="sidebar-toggle-fixed" @onclick="ToggleSidebar">
+        <span>☰</span>
+    </button>
+
+    <!-- Sidebar -->
+    <div class="sidebar @(sidebarOpen ? "open" : "")">
+        <div class="sidebar-header">
+            <button class="new-chat-btn" @onclick="StartNewChat">
+                <span class="new-chat-icon">✏️</span>
+                <span>New chat</span>
+            </button>
+        </div>
+
+        <div class="sidebar-content">
+            @if (historyEntries != null && historyEntries.Any())
+            {
+                <div class="sidebar-section">
+                    <div class="sidebar-section-title">Your chats</div>
+                    @foreach (var entry in historyEntries.Take(20))
+                    {
+                        <div class="history-item @(selectedHistoryId == entry.GetHashCode() ? "active" : "")" 
+                             @onclick="@(() => LoadHistoryEmail(entry))">
+                            <div class="history-item-title">@entry.Response.Subject</div>
+                        </div>
+                    }
+                </div>
+            }
+        </div>
+    </div>
+
+    <!-- Main Content Area -->
+    <div class="main-area">
+        <div class="chat-area">
+            @if (!conversationStarted)
+            {
+                <!-- Welcome Screen -->
+                <div class="welcome-screen">
+                    <h1 class="welcome-title">Hey, Ready to dive in?</h1>
+                    
+                    <div class="welcome-cards">
+                        <div class="welcome-card" @onclick='@(() => QuickStart("Professional", "Meeting Request"))'>
+                            <div class="welcome-card-title">Meeting Request</div>
+                            <div class="welcome-card-desc">Professional tone</div>
+                        </div>
+                        <div class="welcome-card" @onclick='@(() => QuickStart("Friendly", "FollowUp"))'>
+                            <div class="welcome-card-title">Follow Up</div>
+                            <div class="welcome-card-desc">Friendly tone</div>
+                        </div>
+                        <div class="welcome-card" @onclick='@(() => QuickStart("Formal", "LeaveRequest"))'>
+                            <div class="welcome-card-title">Leave Request</div>
+                            <div class="welcome-card-desc">Formal tone</div>
+                        </div>
+                    </div>
+                </div>
+            }
+            else
+            {
+                <!-- Chat Messages -->
+                <div class="chat-messages">
+                    <!-- User Message -->
+                    @if (!string.IsNullOrEmpty(lastUserInput))
+                    {
+                        <div class="message user">
+                            <div class="message-content">
+                                <div class="message-header">
+                                    <div class="message-avatar user">👤</div>
+                                    <div class="message-body">
+                                        <p><strong>Generate email:</strong></p>
+                                        <p>Recipient: @emailRequest.RecipientName</p>
+                                        <p>Tone: @emailRequest.Tone</p>
+                                        <p>Type: @emailRequest.EmailType</p>
+                                        <p>Key Points: @emailRequest.KeyPoints</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    }
+
+                    <!-- Assistant Response -->
+                    @if (generatedEmail != null)
+                    {
+                        <div class="message assistant">
+                            <div class="message-content">
+                                <div class="message-header">
+                                    <div class="message-avatar assistant">🤖</div>
+                                    <div class="message-body">
+                                        <p>I've generated your email. Here it is:</p>
+                                        
+                                        <div class="email-display">
+                                            <div class="email-section">
+                                                <div class="email-label">Subject</div>
+                                                <div class="email-text">@generatedEmail.Subject</div>
+                                            </div>
+                                            
+                                            <div class="email-section">
+                                                <div class="email-label">Message</div>
+                                                <div class="email-text">@generatedEmail.Greeting
+
+@generatedEmail.Body
+
+@generatedEmail.Closing</div>
+                                            </div>
+                                        </div>
+
+                                        <div class="action-buttons">
+                                            <button class="btn-action" @onclick="@(() => CopyToClipboard(generatedEmail))">
+                                                📋 Copy
+                                            </button>
+                                            <button class="btn-action" @onclick="RegenerateEmail">
+                                                🔄 Regenerate
+                                            </button>
+                                            <button class="btn-action" @onclick="EditEmail">
+                                                ✏️ Edit
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    }
+
+                    @if (isLoading)
+                    {
+                        <div class="message assistant">
+                            <div class="message-content">
+                                <div class="message-header">
+                                    <div class="message-avatar assistant">🤖</div>
+                                    <div class="message-body">
+                                        <div class="d-flex align-center gap-2">
+                                            <div class="spinner"></div>
+                                            <span>Generating your email...</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    }
+
+                    <!-- Error Message in Chat -->
+                    @if (!string.IsNullOrEmpty(errorMessage) && conversationStarted)
+                    {
+                        <div class="message assistant">
+                            <div class="message-content">
+                                <div class="message-header">
+                                    <div class="message-avatar assistant">🤖</div>
+                                    <div class="message-body">
+                                        <div class="alert alert-error">
+                                            ⚠️ @errorMessage
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    }
+                </div>
+            }
+        </div>
+
+        <!-- Input Area -->
+        <div class="input-area">
+            <div class="input-container">
+                <button class="generate-email-btn" @onclick="OpenFormModal">
+                    ✉️ Generate an Email
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Form Modal -->
+@if (showFormModal)
+{
+    <div class="form-overlay" @onclick="CloseFormModal">
+        <div class="form-modal" @onclick:stopPropagation="true">
+            <div class="form-modal-header">
+                <h2 class="form-modal-title">Email Details</h2>
+                <button class="close-button" @onclick="CloseFormModal">×</button>
+            </div>
+
+            @if (!string.IsNullOrEmpty(copyMessage))
+            {
+                <div class="alert alert-success">
+                    ✓ @copyMessage
+                </div>
+            }
+
+            @if (!string.IsNullOrEmpty(errorMessage))
+            {
+                <div class="alert alert-error">
+                    ⚠ @errorMessage
+                </div>
+            }
+
+            <EditForm Model="@emailRequest" OnValidSubmit="@GenerateEmail">
+                <DataAnnotationsValidator />
+
+                <div class="form-group">
+                    <label for="recipientName" class="form-label">Recipient Name</label>
+                    <InputText id="recipientName" 
+                               class="form-control" 
+                               @bind-Value="emailRequest.RecipientName" 
+                               placeholder="e.g., John Doe" />
+                    <ValidationMessage For="@(() => emailRequest.RecipientName)" />
+                </div>
+
+                <div class="form-group">
+                    <label for="tone" class="form-label">Tone</label>
+                    <InputSelect id="tone" class="form-select" @bind-Value="emailRequest.Tone">
+                        <option value="">Select tone...</option>
+                        <option value="Professional">Professional</option>
+                        <option value="Friendly">Friendly</option>
+                        <option value="Formal">Formal</option>
+                        <option value="Informal">Informal</option>
+                    </InputSelect>
+                    <ValidationMessage For="@(() => emailRequest.Tone)" />
+                </div>
+
+                <div class="form-group">
+                    <label for="emailType" class="form-label">Email Type</label>
+                    <InputSelect id="emailType" class="form-select" @bind-Value="emailRequest.EmailType">
+                        <option value="">Select type...</option>
+                        <option value="FollowUp">Follow Up</option>
+                        <option value="LeaveRequest">Leave Request</option>
+                        <option value="MeetingRequest">Meeting Request</option>
+                    </InputSelect>
+                    <ValidationMessage For="@(() => emailRequest.EmailType)" />
+                </div>
+
+                <div class="form-group">
+                    <label for="keyPoints" class="form-label">Key Points</label>
+                    <InputTextArea id="keyPoints" 
+                                  class="form-control" 
+                                  @bind-Value="emailRequest.KeyPoints"
+                                  @oninput="OnKeyPointsInput"
+                                  placeholder="Enter the main points you want to include..." 
+                                  maxlength="500" />
+                    <ValidationMessage For="@(() => emailRequest.KeyPoints)" />
+                    <div class="char-counter">@currentCharCount / 500</div>
+                </div>
+
+                <button type="submit" class="btn btn-primary btn-full" disabled="@isLoading">
+                    @if (isLoading)
+                    {
+                        <span class="spinner"></span>
+                        <span>Generating...</span>
+                    }
+                    else
+                    {
+                        <span>Generate Email</span>
+                    }
+                </button>
+            </EditForm>
+        </div>
+    </div>
+}
+
+@code {
+    private EmailRequest emailRequest = new();
+    private EmailResponse? generatedEmail;
+    private List<EmailHistoryEntry>? historyEntries;
+    private bool isLoading = false;
+    private string errorMessage = string.Empty;
+    private string copyMessage = string.Empty;
+    private bool conversationStarted = false;
+    private string lastUserInput = string.Empty;
+    private int selectedHistoryId = 0;
+    private bool sidebarOpen = true; // Initially open
+    private bool showFormModal = false;
+    private int currentCharCount = 0;
+    private bool isEditMode = false;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadHistory();
+    }
+
+    private async Task LoadHistory()
+    {
+        try
+        {
+            historyEntries = await ApiService.GetEmailHistoryAsync();
+        }
+        catch (Exception)
+        {
+            historyEntries = new List<EmailHistoryEntry>();
+        }
+    }
+
+    private void ToggleSidebar()
+    {
+        sidebarOpen = !sidebarOpen;
+    }
+
+    private void OpenFormModal()
+    {
+        showFormModal = true;
+        isEditMode = false;
+        currentCharCount = emailRequest.KeyPoints?.Length ?? 0;
+    }
+
+    private void CloseFormModal()
+    {
+        showFormModal = false;
+        errorMessage = string.Empty;
+    }
+
+    private void QuickStart(string tone, string emailType)
+    {
+        emailRequest.Tone = tone;
+        emailRequest.EmailType = emailType;
+        isEditMode = false;
+        OpenFormModal();
+    }
+
+    private void OnKeyPointsInput(ChangeEventArgs e)
+    {
+        var value = e.Value?.ToString() ?? string.Empty;
+        currentCharCount = value.Length;
+        emailRequest.KeyPoints = value;
+    }
+
+    private async Task GenerateEmail()
+    {
+        try
+        {
+            isLoading = true;
+            errorMessage = string.Empty;
+            copyMessage = string.Empty;
+            conversationStarted = true;
+
+            lastUserInput = $"{emailRequest.RecipientName} - {emailRequest.Tone} {emailRequest.EmailType}";
+
+            generatedEmail = await ApiService.GenerateEmailAsync(emailRequest);
+
+            // Only reload history if not in edit mode
+            if (!isEditMode)
+            {
+                await LoadHistory();
+            }
+            
+            showFormModal = false;
+            isEditMode = false;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"DEBUG: Exception caught in GenerateEmail: {ex.Message}");
+            errorMessage = ex.Message;
+            generatedEmail = null;
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+    private void StartNewChat()
+    {
+        emailRequest = new EmailRequest();
+        generatedEmail = null;
+        conversationStarted = false;
+        lastUserInput = string.Empty;
+        selectedHistoryId = 0;
+        errorMessage = string.Empty;
+        copyMessage = string.Empty;
+        showFormModal = false;
+        isEditMode = false;
+        currentCharCount = 0;
+    }
+
+    private void LoadHistoryEmail(EmailHistoryEntry entry)
+    {
+        selectedHistoryId = entry.GetHashCode();
+        emailRequest = new EmailRequest
+        {
+            RecipientName = entry.Request.RecipientName,
+            Tone = entry.Request.Tone,
+            EmailType = entry.Request.EmailType,
+            KeyPoints = entry.Request.KeyPoints
+        };
+        generatedEmail = entry.Response;
+        conversationStarted = true;
+        lastUserInput = $"{entry.Request.RecipientName} - {entry.Request.Tone} {entry.Request.EmailType}";
+        errorMessage = string.Empty;
+        copyMessage = string.Empty;
+        currentCharCount = emailRequest.KeyPoints?.Length ?? 0;
+    }
+
+    private async Task RegenerateEmail()
+    {
+        isEditMode = true; // Set edit mode to prevent new history entry
+        await GenerateEmail();
+    }
+
+    private void EditEmail()
+    {
+        isEditMode = true; // Set edit mode to prevent new history entry
+        OpenFormModal();
+    }
+
+    private async Task CopyToClipboard(EmailResponse email)
+    {
+        try
+        {
+            var emailText = $"Subject: {email.Subject}\n\n{email.Greeting}\n\n{email.Body}\n\n{email.Closing}";
+            var success = await JSRuntime.InvokeAsync<bool>("clipboardHelper.copyToClipboard", emailText);
+
+            if (success)
+            {
+                copyMessage = "Email copied to clipboard!";
+                await Task.Delay(3000);
+                copyMessage = string.Empty;
+                StateHasChanged();
+            }
+            else
+            {
+                errorMessage = "Failed to copy to clipboard.";
+            }
+        }
+        catch (Exception)
+        {
+            errorMessage = "Clipboard not supported in this browser.";
+        }
+    }
+}
